@@ -1,21 +1,43 @@
 from flask import Flask, request, render_template, redirect, jsonify
 from supabase import create_client, Client
-import sqlite3
 import random
 from dotenv import load_dotenv
 import os
+import psycopg2
+from psycopg2 import sql
 
 app = Flask(__name__)
-DB_NAME = 'blogs.db'
 BUCKET_NAME = "gcpbucket"
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Initialize Supabase client
+# Initialize Supabase client for storage
 url = os.getenv("SUPABASE_URL")  # Load Supabase URL from .env
 key = os.getenv("SUPABASE_KEY")   # Load Supabase Key from .env
 supabase: Client = create_client(url, key)
+
+# PostgreSQL connection parameters
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+
+def get_db_connection():
+    """Create and return a connection to the PostgreSQL database"""
+    try:
+        connection = psycopg2.connect(
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME
+        )
+        return connection
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        raise
 
 def upload_file(s_file, d_file_name):
     # Read the contents of the FileStorage object into a bytes object
@@ -42,11 +64,11 @@ def generate_name_tag(name):
 
 # Initialize database and create table if not exists
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS blogs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             title TEXT NOT NULL,
             image_url TEXT NOT NULL,
             content TEXT NOT NULL,
@@ -54,16 +76,16 @@ def init_db():
         )
     ''')
     conn.commit()
+    cursor.close()
     conn.close()
-
-init_db()
 
 @app.route('/', methods=['GET'])
 def get_blogs():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT id, title, image_url, content, author FROM blogs')
     blogs = cursor.fetchall()
+    cursor.close()
     conn.close()
     return render_template('blogs.html', blogs=blogs), 200
 
@@ -80,14 +102,18 @@ def create_blog():
 
         image_url = upload_file(image, generate_name_tag(author))
 
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('INSERT INTO blogs (title, image_url, content, author) VALUES (?, ?, ?, ?)', (title, image_url, content, author))
+        cursor.execute(
+            'INSERT INTO blogs (title, image_url, content, author) VALUES (%s, %s, %s, %s)',
+            (title, image_url, content, author)
+        )
         conn.commit()
+        cursor.close()
         conn.close()
         return redirect('/')
     return render_template('create_blogs.html')
 
 if __name__ == '__main__':
     init_db()
-    app.run(host='0.0.0.0')
+    app.run(host='0.0.0.0', debug=True)
