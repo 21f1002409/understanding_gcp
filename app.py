@@ -56,6 +56,8 @@ def init_db():
     conn.commit()
     conn.close()
 
+init_db()
+
 @app.route('/', methods=['GET'])
 def get_blogs():
     conn = sqlite3.connect(DB_NAME)
