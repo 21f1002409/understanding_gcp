@@ -5,6 +5,11 @@ from dotenv import load_dotenv
 import os
 import psycopg2
 from psycopg2 import sql
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 BUCKET_NAME = "gcpbucket"
@@ -13,30 +18,22 @@ BUCKET_NAME = "gcpbucket"
 load_dotenv()
 
 # Initialize Supabase client for storage
-url = os.getenv("SUPABASE_URL")  # Load Supabase URL from .env
-key = os.getenv("SUPABASE_KEY")   # Load Supabase Key from .env
-supabase: Client = create_client(url, key)
+SUPABASE_URL = os.getenv("SUPABASE_URL")  # Load Supabase URL from .env
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")   # Load Supabase Key from .env
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# PostgreSQL connection parameters
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
+# Supabase PostgreSQL connection URL
+DATABASE_URL = os.getenv("DATABASE_URL")  # Format: postgresql://postgres:[PASSWORD]@db.cyqhfqflmxgfljsyfclb.supabase.co:5432/postgres
 
 def get_db_connection():
-    """Create and return a connection to the PostgreSQL database"""
+    """Create and return a connection to the Supabase PostgreSQL database"""
     try:
-        connection = psycopg2.connect(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=DB_PORT,
-            dbname=DB_NAME
-        )
+        logger.info("Connecting to Supabase PostgreSQL database")
+        connection = psycopg2.connect(DATABASE_URL)
+        logger.info("Database connection successful")
         return connection
     except Exception as e:
-        print(f"Database connection error: {e}")
+        logger.error(f"Database connection error: {e}")
         raise
 
 def upload_file(s_file, d_file_name):
@@ -47,15 +44,14 @@ def upload_file(s_file, d_file_name):
     try:
         # Upload the file to Supabase storage
         response = supabase.storage.from_(BUCKET_NAME).upload(d_file_name, file_content)
-        print(f"Upload response: {response}")  # Log the response for debugging
+        logger.info(f"Upload response: {response}")
         
         # Get the public URL of the uploaded file
         public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(d_file_name)
-        print(f"Public URL: {public_url}")  # Log the public URL for debugging
+        logger.info(f"Public URL: {public_url}")
         return public_url
     except Exception as e:
-        # Log or handle the error
-        print(f"Failed to upload file: {e}")
+        logger.error(f"Failed to upload file: {e}")
         raise
 
 def generate_name_tag(name):
@@ -66,6 +62,7 @@ def generate_name_tag(name):
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
+    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS blogs (
             id SERIAL PRIMARY KEY,
@@ -75,9 +72,11 @@ def init_db():
             author TEXT NOT NULL
         )
     ''')
+    
     conn.commit()
     cursor.close()
     conn.close()
+    logger.info("Database initialized successfully")
 
 @app.route('/', methods=['GET'])
 def get_blogs():
@@ -104,10 +103,12 @@ def create_blog():
 
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         cursor.execute(
             'INSERT INTO blogs (title, image_url, content, author) VALUES (%s, %s, %s, %s)',
             (title, image_url, content, author)
         )
+            
         conn.commit()
         cursor.close()
         conn.close()
@@ -115,5 +116,9 @@ def create_blog():
     return render_template('create_blogs.html')
 
 if __name__ == '__main__':
-    init_db()
-    app.run(host='0.0.0.0', debug=True)
+    try:
+        init_db()
+        logger.info("Starting Flask application")
+        app.run(host='0.0.0.0', debug=True)
+    except Exception as e:
+        logger.error(f"Application error: {e}")
